@@ -524,7 +524,6 @@ fig_tree.update_traces(
     texttemplate="<b>%{label}</b><br>%{customdata[1]:.2f}%",
     hovertemplate="<b>%{customdata[0]}</b><br>Daily change: %{customdata[1]:.2f}%<extra></extra>",
     textfont=dict(size=12),
-    insidetextanchor="middle",
 )
 fig_tree.update_layout(
     paper_bgcolor="#f0f4f8", margin=dict(l=0, r=0, t=10, b=0),
