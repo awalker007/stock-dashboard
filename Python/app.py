@@ -1,11 +1,16 @@
 # app.py
 # ============================================================
-# Entry point for the multi-page Streamlit application.
+# Entry point for the 5-page Stock Dashboard application.
 #
-# Streamlit automatically discovers pages in the pages/ folder
-# and builds the sidebar navigation from them. This file just
-# sets the global page config and immediately redirects the user
-# to the Command Center page so the root URL is not blank.
+# Page structure:
+#   1. Morning Brief  — PULSE, IQ, sector treemap, news feed
+#   2. Radar          — Momentum Radar, Smart Watchlist
+#   3. Chart Terminal — interactive price chart, fundamentals
+#   4. Signal Scanner — condition builder, historical backtesting
+#   5. Portfolio      — paper trades, LEAP tracker, alert log
+#
+# Streamlit discovers pages/ automatically and builds the sidebar.
+# This file bootstraps the database and redirects to page 1.
 #
 # Run with:  streamlit run app.py
 # ============================================================
@@ -13,9 +18,6 @@
 import streamlit as st
 from database import initialize_database
 
-# ── Page configuration ───────────────────────────────────────
-# layout="wide" means the content fills the full browser width.
-# This must be the very first Streamlit call in the file.
 st.set_page_config(
     page_title="Stock Dashboard",
     page_icon="📈",
@@ -23,11 +25,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Database bootstrap ───────────────────────────────────────
-# Make sure all SQLite tables exist before any page tries to use them.
+# Ensure all SQLite tables exist before any page tries to read them.
 initialize_database()
 
-# ── Redirect to Command Center ───────────────────────────────
-# st.switch_page sends the user straight to the first real page.
-# Without this the entry point would show an empty white screen.
-st.switch_page("pages/1_Command_Center.py")
+# Redirect immediately to Morning Brief so the root URL is not blank.
+st.switch_page("pages/1_Morning_Brief.py")

@@ -10,7 +10,8 @@
       "Read(//Users/basi/pages/**)",
       "Read(//Users/basi/**)",
       "Bash(python3)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python -c ' *)"
     ]
   }
 }
