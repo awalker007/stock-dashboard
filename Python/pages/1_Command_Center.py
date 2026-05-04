@@ -62,8 +62,6 @@ UNIVERSE = get_universe()
 # script from top to bottom. Without session_state, any selection the
 # user made would reset to None on the next re-run. We initialise both
 # keys here so they always exist before any widget reads them.
-if "selected_sector" not in st.session_state:
-    st.session_state.selected_sector = None   # name of the active sector button
 if "selected_ticker" not in st.session_state:
     st.session_state.selected_ticker = None   # ticker of the active company card
 
@@ -472,149 +470,201 @@ if iq_clicked or st.session_state.get("iq_ran"):
 st.markdown("<hr style='border:none;border-top:1px solid #e2e8f0;margin:20px 0;'>", unsafe_allow_html=True)
 
 # ============================================================
-# SECTION 2 — SECTOR TREEMAP + DRILL-DOWN
+# SECTION 2 — MARKET MAP (Finviz-style nested treemap)
 # ============================================================
 
-SECTOR_ETFS = {
-    "XLK":  {"name": "Technology",               "weight": 29},
-    "XLC":  {"name": "Communication Services",   "weight": 9},
-    "XLV":  {"name": "Health Care",              "weight": 13},
-    "XLF":  {"name": "Financials",               "weight": 13},
-    "XLY":  {"name": "Consumer Discretionary",   "weight": 11},
-    "XLI":  {"name": "Industrials",              "weight": 9},
-    "XLP":  {"name": "Consumer Staples",         "weight": 6},
-    "XLE":  {"name": "Energy",                   "weight": 4},
-    "XLB":  {"name": "Materials",                "weight": 2},
-    "XLRE": {"name": "Real Estate",              "weight": 2},
-    "XLU":  {"name": "Utilities",                "weight": 2},
+# Outer keys = sector names. Inner dict = ticker -> approximate market cap in $B.
+# These caps are static estimates used only for block sizing — not live data.
+MARKET_MAP = {
+    "Technology":             {"AAPL": 3500, "MSFT": 3000, "NVDA": 2800, "AVGO": 800,  "ORCL": 500,  "CRM": 300,  "AMD": 250, "INTC": 100, "QCOM": 160, "TXN": 150},
+    "Healthcare":             {"UNH":  500,  "JNJ":  380,  "LLY":  700,  "ABBV": 320,  "MRK":  260,  "TMO": 200,  "ABT": 190, "DHR": 170,  "BMY": 130,  "AMGN": 160},
+    "Financials":             {"BRK-B": 900, "JPM":  700,  "V":    550,  "MA":   430,  "BAC":  320,  "WFC": 230,  "GS":  180, "MS":  190,  "AXP": 200,  "BLK": 130},
+    "Consumer Discretionary": {"AMZN": 2000, "TSLA": 800,  "HD":   350,  "MCD":  220,  "NKE":  100,  "SBUX": 90,  "TJX": 130, "BKNG": 150, "LOW": 130,  "CMG": 80},
+    "Consumer Staples":       {"WMT":  700,  "PG":   380,  "KO":   260,  "PEP":  210,  "COST": 400,  "PM":  160,  "MO":  90,  "CL":   60,  "MDLZ": 80,  "KMB": 45},
+    "Energy":                 {"XOM":  500,  "CVX":  280,  "COP":  130,  "EOG":  70,   "SLB":  60,   "MPC": 60,   "PSX": 55,  "VLO":  50,  "OXY":  50,  "PXD": 45},
+    "Industrials":            {"CAT":  180,  "UPS":  130,  "HON":  130,  "UNP":  140,  "BA":   120,  "GE":  200,  "MMM": 70,  "RTX":  150, "LMT":  110, "DE":  100},
+    "Communication Services": {"GOOGL": 2000,"META": 1400, "NFLX": 380,  "DIS":  190,  "CMCSA": 150, "T":   140,  "VZ":  170, "EA":   35,  "TTWO": 25,  "SNAP": 15},
+    "Materials":              {"LIN":  220,  "APD":  60,   "ECL":  60,   "DD":   30,   "NEM":  50,   "FCX": 55,   "ALB": 15,  "VMC":  30,  "MLM":  35,  "IFF": 15},
+    "Utilities":              {"NEE":  110,  "DUK":  55,   "SO":   50,   "D":    45,   "AEP":  40,   "EXC": 35,   "XEL": 30,  "ES":   25,  "WEC":  25,  "ETR": 20},
+    "Real Estate":            {"AMT":  90,   "PLD":  110,  "CCI":  45,   "EQIX": 70,   "PSA":  50,   "DLR": 45,   "O":   55,  "WELL": 55,  "SPG":  70,  "AVB": 30},
 }
 
-SECTOR_STOCKS = {
-    "Technology":               ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "AMD", "ADBE", "CSCO", "QCOM", "TXN"],
-    "Communication Services":   ["META", "GOOGL", "NFLX", "DIS", "T", "VZ", "CMCSA", "EA", "TTWO", "WBD"],
-    "Health Care":              ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "BMY", "AMGN", "GILD"],
-    "Financials":               ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "BLK", "SCHW"],
-    "Consumer Discretionary":   ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "GM"],
-    "Industrials":              ["GE", "RTX", "CAT", "HON", "UNP", "BA", "DE", "LMT", "NOC", "MMM"],
-    "Consumer Staples":         ["PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "CL", "MDLZ", "GIS"],
-    "Energy":                   ["XOM", "CVX", "COP", "EOG", "SLB", "PSX", "MPC", "VLO", "OXY", "PXD"],
-    "Materials":                ["LIN", "APD", "SHW", "ECL", "FCX", "NEM", "DD", "PPG", "ALB", "CF"],
-    "Real Estate":              ["AMT", "PLD", "CCI", "EQIX", "PSA", "DLR", "O", "WELL", "SPG", "VICI"],
-    "Utilities":                ["NEE", "SO", "DUK", "AEP", "SRE", "EXC", "D", "ED", "PCG", "ETR"],
-}
+# Flat set of all stock tickers — used to distinguish stock-level clicks from sector clicks
+_ALL_MAP_TICKERS = {tkr for stocks in MARKET_MAP.values() for tkr in stocks}
 
 
-@st.cache_data(ttl=600)
-def load_sector_data() -> pd.DataFrame:
-    rows = []
-    for etf, meta in SECTOR_ETFS.items():
-        try:
-            df = yf.download(etf, period="5d", interval="1d", auto_adjust=True, progress=False)
-            if len(df) >= 2:
-                closes = df["Close"].squeeze()
-                chg = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
-            else:
-                chg = 0.0
-            rows.append({"etf": etf, "name": meta["name"], "weight": meta["weight"], "change_pct": chg})
-        except Exception:
-            rows.append({"etf": etf, "name": meta["name"], "weight": meta["weight"], "change_pct": 0.0})
-    return pd.DataFrame(rows)
-
-
-@st.cache_data(ttl=600)
-def load_stock_changes(tickers: tuple) -> dict:
-    result = {}
-    for tkr in tickers:
-        try:
-            df = yf.download(tkr, period="5d", interval="1d", auto_adjust=True, progress=False)
-            if len(df) >= 2:
-                closes = df["Close"].squeeze()
-                result[tkr] = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
-            else:
-                result[tkr] = 0.0
-        except Exception:
-            result[tkr] = 0.0
+@st.cache_data(ttl=600, show_spinner=False)
+def load_market_map_changes() -> dict:
+    """
+    Download the daily % change for every stock in the market map.
+    Uses a single batch yfinance download for efficiency. Cached 10 minutes (ttl=600).
+    Returns {ticker: change_pct_float}.
+    """
+    all_tickers = [tkr for stocks in MARKET_MAP.values() for tkr in stocks]
+    result = {tkr: 0.0 for tkr in all_tickers}
+    try:
+        # Batch download all tickers at once — much faster than ~110 individual calls
+        raw = yf.download(
+            all_tickers, period="5d", interval="1d",
+            auto_adjust=True, progress=False, group_by="ticker",
+        )
+        for tkr in all_tickers:
+            try:
+                # With group_by="ticker", yfinance returns a MultiIndex where columns are
+                # (ticker, price_field), so raw[tkr]["Close"] gives that ticker's close series
+                closes = raw[tkr]["Close"].dropna()
+                if len(closes) >= 2:
+                    result[tkr] = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
+            except Exception:
+                pass
+    except Exception:
+        # Per-ticker fallback if the batch download fails
+        for tkr in all_tickers:
+            try:
+                df = yf.download(tkr, period="5d", interval="1d", auto_adjust=True, progress=False)
+                closes = df["Close"].squeeze().dropna()
+                if len(closes) >= 2:
+                    result[tkr] = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
+            except Exception:
+                pass
     return result
 
 
-section_label("Sector Performance Treemap")
-sector_df = load_sector_data()
+def _change_to_color(change: float) -> str:
+    """Map a daily % change to a Finviz-style hex color."""
+    if change >= 2.0:
+        return "#00aa00"   # deep green  (>= +2%)
+    if change >= 0:
+        return "#88cc88"   # light green (0 to +2%)
+    if change >= -2.0:
+        return "#cc8888"   # light red   (0 to -2%)
+    return "#aa0000"       # deep red    (<= -2%)
 
-fig_tree = px.treemap(
-    sector_df, path=["name"], values="weight",
-    color="change_pct", color_continuous_scale="RdYlGn",
-    color_continuous_midpoint=0, custom_data=["etf", "change_pct"],
-)
-fig_tree.update_traces(
-    texttemplate="<b>%{label}</b><br>%{customdata[1]:.2f}%",
-    hovertemplate="<b>%{label}</b> (%{customdata[0]})<br>Daily change: %{customdata[1]:.2f}%<extra></extra>",
-    textfont=dict(size=14),
-)
-fig_tree.update_layout(
-    paper_bgcolor="#f0f4f8", margin=dict(l=0, r=0, t=10, b=0),
-    height=300, coloraxis_showscale=False,
-)
 
-treemap_result = st.plotly_chart(
-    fig_tree, use_container_width=True,
-    on_select="rerun", key="sector_treemap",
+def build_market_treemap(changes: dict) -> go.Figure:
+    """
+    Build a Finviz-style nested Plotly treemap showing all S&P 500 sectors
+    and their constituent stocks simultaneously — no clicking required to reveal stocks.
+
+    How the Plotly Treemap data structure works:
+      Every node (sector or individual stock) is described by parallel arrays:
+        ids[]     — a unique string key for every node in the tree
+        labels[]  — the short display name (also returned verbatim on click events)
+        parents[] — the id of this node's parent; "" means top-level / no parent
+        values[]  — the numeric size used to draw the block (market cap in $B here)
+      branchvalues="total" tells Plotly that each parent node's value must equal
+      the declared sum of its children, so sector block areas are automatically
+      proportional to the combined market cap of their stocks — no separate
+      weight list is needed.
+      The tree has exactly two levels:
+        Level 1 (outer) = sector blocks, each sized by total sector market cap
+        Level 2 (inner) = individual stock blocks, each sized by its own cap
+                          relative to the sector total
+    """
+    ids, labels, parents, values, text_display, colors, customdata = [], [], [], [], [], [], []
+
+    for sector_name, stocks in MARKET_MAP.items():
+        sector_total = sum(stocks.values())
+
+        # Weight the sector header color by market cap so large-cap names
+        # (AAPL, MSFT, NVDA) drive the sector color more than tiny ones
+        sector_avg_chg = (
+            sum(changes.get(t, 0.0) * cap for t, cap in stocks.items()) / sector_total
+        )
+
+        # Sector node: parents="" places it at the root level of the tree
+        ids.append(sector_name)
+        labels.append(sector_name)
+        parents.append("")
+        values.append(sector_total)
+        text_display.append(sector_name)
+        colors.append(_change_to_color(sector_avg_chg))
+        customdata.append([sector_avg_chg, "sector"])
+
+        for ticker, mktcap in stocks.items():
+            change = changes.get(ticker, 0.0)
+            sign = "+" if change >= 0 else ""
+
+            # Stock node: parents=sector_name nests it inside that sector's block
+            ids.append(ticker)
+            labels.append(ticker)        # raw ticker symbol is returned by click events
+            parents.append(sector_name)
+            values.append(mktcap)
+            # Two-line label shown inside each block: ticker symbol then daily change
+            text_display.append(f"{ticker}<br>{sign}{change:.1f}%")
+            colors.append(_change_to_color(change))
+            customdata.append([change, "stock"])
+
+    fig = go.Figure(go.Treemap(
+        ids=ids,
+        labels=labels,
+        parents=parents,
+        values=values,
+        branchvalues="total",       # parent size = sum of its children's values
+        text=text_display,
+        texttemplate="%{text}",     # render the pre-built "TICKER<br>+x.x%" string
+        textfont=dict(size=12, color="#ffffff", family="Inter, system-ui, sans-serif"),
+        marker=dict(
+            colors=colors,
+            line=dict(width=1.5, color="#ffffff"),
+        ),
+        customdata=customdata,
+        hovertemplate=(
+            "<b>%{label}</b><br>"
+            "Daily: %{customdata[0]:+.2f}%<br>"
+            "Sector: %{parent}<extra></extra>"
+        ),
+    ))
+
+    fig.update_layout(
+        paper_bgcolor="#f0f4f8",
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=650,
+        # uniformtext hides any label that cannot fit cleanly inside its block
+        uniformtext=dict(minsize=9, mode="hide"),
+    )
+
+    return fig
+
+
+section_label("S&P 500 Market Map")
+
+with st.spinner("Loading market data…"):
+    map_changes = load_market_map_changes()
+
+fig_market_map = build_market_treemap(map_changes)
+
+market_map_result = st.plotly_chart(
+    fig_market_map,
+    use_container_width=True,
+    on_select="rerun",
+    key="market_map_treemap",
     config={"displayModeBar": False},
 )
 
 st.markdown(
     f"<div style='font-size:0.75rem;color:{TEXT_LIGHT};margin-top:-8px;margin-bottom:12px;'>"
-    f"Block size = approximate S&P 500 sector weight. Color = today's daily performance. "
-    f"Click a sector block to expand its top 10 holdings.</div>",
+    f"Block size = approximate market cap.&nbsp;&nbsp;"
+    f"<span style='color:#00aa00;font-weight:700;'>&#9632;</span> &ge;+2%&nbsp;&nbsp;"
+    f"<span style='color:#88cc88;font-weight:700;'>&#9632;</span> 0&ndash;+2%&nbsp;&nbsp;"
+    f"<span style='color:#cc8888;font-weight:700;'>&#9632;</span> 0&ndash;&minus;2%&nbsp;&nbsp;"
+    f"<span style='color:#aa0000;font-weight:700;'>&#9632;</span> &le;&minus;2%&nbsp;&nbsp;"
+    f"&middot; Click a stock block to filter the news feed below. Data cached 10 min.</div>",
     unsafe_allow_html=True,
 )
 
-# ── Treemap click → set selected_sector ──────────────────────
-if treemap_result and hasattr(treemap_result, "selection"):
-    pts = treemap_result.selection.get("points", [])
+# Treemap click handler: pts[0]["label"] contains the raw label of the clicked node.
+# We only respond to stock-level clicks (leaves) — sector header clicks are ignored.
+# Clicking the same stock again clears the filter (toggle behaviour).
+if market_map_result and hasattr(market_map_result, "selection"):
+    pts = market_map_result.selection.get("points", [])
     if pts:
         clicked_label = pts[0].get("label", "")
-        if clicked_label in SECTOR_STOCKS:
-            if st.session_state.selected_sector == clicked_label:
-                st.session_state.selected_sector = None
-            else:
-                st.session_state.selected_sector = clicked_label
+        if clicked_label in _ALL_MAP_TICKERS:
+            if st.session_state.selected_ticker == clicked_label:
                 st.session_state.selected_ticker = None
-
-# ── Company cards grid ────────────────────────────────────────
-if st.session_state.selected_sector and st.session_state.selected_sector in SECTOR_STOCKS:
-    stocks = SECTOR_STOCKS[st.session_state.selected_sector]
-    stock_changes = load_stock_changes(tuple(stocks))
-
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    cards_hdr_col, cards_clear_col = st.columns([6, 1])
-    with cards_hdr_col:
-        section_label(f"Top 10 Holdings — {st.session_state.selected_sector}")
-    with cards_clear_col:
-        if st.button("✕ Clear", key="clear_sector_btn"):
-            st.session_state.selected_sector = None
-            st.session_state.selected_ticker = None
-            st.rerun()
-
-    for row_stocks in [stocks[:5], stocks[5:]]:
-        card_cols = st.columns(5)
-        for col, tkr in zip(card_cols, row_stocks):
-            chg       = stock_changes.get(tkr, 0.0)
-            chg_color = GREEN if chg >= 0 else RED
-            sign_str  = ("+" if chg >= 0 else "") + f"{chg:.1f}%"
-            is_active = st.session_state.selected_ticker == tkr
-            border    = f"2px solid {ACCENT}" if is_active else f"1px solid {BORDER}"
-            with col:
-                if st.button("\u00a0", key=f"stock_card_{tkr}", use_container_width=True):
-                    st.session_state.selected_ticker = None if is_active else tkr
-                    st.rerun()
-                st.markdown(
-                    f"<div style='margin-top:-42px;pointer-events:none;text-align:center;"
-                    f"background:{CARD_BG};border:{border};border-radius:8px;padding:8px 4px;'>"
-                    f"<div style='font-size:0.80rem;font-weight:700;color:{TEXT_DARK};'>{tkr}</div>"
-                    f"<div style='font-size:0.75rem;font-weight:600;color:{chg_color};'>{sign_str}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
+            else:
+                st.session_state.selected_ticker = clicked_label
 
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 st.markdown("<hr style='border:none;border-top:1px solid #e2e8f0;margin:20px 0;'>", unsafe_allow_html=True)

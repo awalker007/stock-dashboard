@@ -6,7 +6,11 @@
       "Bash(.venv/bin/streamlit run *)",
       "Read(//tmp/**)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8502)",
-      "Bash(xargs kill *)"
+      "Bash(xargs kill *)",
+      "Read(//Users/basi/pages/**)",
+      "Read(//Users/basi/**)",
+      "Bash(python3)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
