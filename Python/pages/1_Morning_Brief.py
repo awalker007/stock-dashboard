@@ -462,20 +462,33 @@ SECTOR_STOCKS = {
 
 
 @st.cache_data(ttl=600)
-def load_sector_data() -> pd.DataFrame:
+def load_nested_treemap_data() -> pd.DataFrame:
+    all_tickers = [tkr for stocks in SECTOR_STOCKS.values() for tkr in stocks]
     rows = []
-    for etf, meta in SECTOR_ETFS.items():
+    for tkr in all_tickers:
         try:
-            df = yf.download(etf, period="5d", interval="1d", auto_adjust=True, progress=False)
-            if len(df) >= 2:
-                closes = df["Close"].squeeze()
-                chg = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
+            info = yf.Ticker(tkr).fast_info
+            mkt_cap = getattr(info, "market_cap", None) or 1e9
+            last = getattr(info, "last_price", None)
+            prev = getattr(info, "previous_close", None)
+            if last and prev and prev > 0:
+                chg = (last / prev - 1) * 100
             else:
                 chg = 0.0
-            rows.append({"etf": etf, "name": meta["name"], "weight": meta["weight"], "change_pct": chg})
         except Exception:
-            rows.append({"etf": etf, "name": meta["name"], "weight": meta["weight"], "change_pct": 0.0})
-    return pd.DataFrame(rows)
+            mkt_cap = 1e9
+            chg = 0.0
+        rows.append({"ticker": tkr, "market_cap": mkt_cap, "change_pct": chg})
+
+    sector_lookup = {
+        tkr: sector
+        for sector, stocks in SECTOR_STOCKS.items()
+        for tkr in stocks
+    }
+    df = pd.DataFrame(rows)
+    df["sector"] = df["ticker"].map(sector_lookup)
+    df["market_cap"] = df["market_cap"].clip(lower=1e8)
+    return df
 
 
 @st.cache_data(ttl=600)
@@ -495,21 +508,27 @@ def load_stock_changes(tickers: tuple) -> dict:
 
 
 section_label("Sector Performance Treemap")
-sector_df = load_sector_data()
+with st.spinner("Loading sector treemap…"):
+    treemap_df = load_nested_treemap_data()
 
 fig_tree = px.treemap(
-    sector_df, path=["name"], values="weight",
-    color="change_pct", color_continuous_scale="RdYlGn",
-    color_continuous_midpoint=0, custom_data=["etf", "change_pct"],
+    treemap_df,
+    path=["sector", "ticker"],
+    values="market_cap",
+    color="change_pct",
+    color_continuous_scale="RdYlGn",
+    color_continuous_midpoint=0,
+    custom_data=["ticker", "change_pct"],
 )
 fig_tree.update_traces(
     texttemplate="<b>%{label}</b><br>%{customdata[1]:.2f}%",
-    hovertemplate="<b>%{label}</b> (%{customdata[0]})<br>Daily change: %{customdata[1]:.2f}%<extra></extra>",
-    textfont=dict(size=14),
+    hovertemplate="<b>%{customdata[0]}</b><br>Daily change: %{customdata[1]:.2f}%<extra></extra>",
+    textfont=dict(size=12),
+    insidetextanchor="middle",
 )
 fig_tree.update_layout(
     paper_bgcolor="#f0f4f8", margin=dict(l=0, r=0, t=10, b=0),
-    height=300, coloraxis_showscale=False,
+    height=440, coloraxis_showscale=False,
 )
 
 treemap_result = st.plotly_chart(
@@ -520,22 +539,34 @@ treemap_result = st.plotly_chart(
 
 st.markdown(
     f"<div style='font-size:0.75rem;color:{TEXT_LIGHT};margin-top:-8px;margin-bottom:12px;'>"
-    f"Block size = approximate S&P 500 sector weight. Color = today's daily performance. "
-    f"Click a sector block to expand its top 10 holdings.</div>",
+    f"Block size = market cap. Color = today's daily change. "
+    f"Click a stock to filter the news feed below.</div>",
     unsafe_allow_html=True,
 )
 
-# ── Treemap click → set selected_sector ──────────────────────
+# ── Treemap click → set selected_sector or selected_ticker ───
 if treemap_result and hasattr(treemap_result, "selection"):
     pts = treemap_result.selection.get("points", [])
     if pts:
         clicked_label = pts[0].get("label", "")
         if clicked_label in SECTOR_STOCKS:
+            # Clicked a sector outer block
             if st.session_state.selected_sector == clicked_label:
                 st.session_state.selected_sector = None
             else:
                 st.session_state.selected_sector = clicked_label
                 st.session_state.selected_ticker = None
+        else:
+            # Clicked an inner stock block — check if it's a known ticker
+            all_tickers = [t for stocks in SECTOR_STOCKS.values() for t in stocks]
+            if clicked_label in all_tickers:
+                st.session_state.selected_ticker = (
+                    None if st.session_state.selected_ticker == clicked_label else clicked_label
+                )
+                for sector, stocks in SECTOR_STOCKS.items():
+                    if clicked_label in stocks:
+                        st.session_state.selected_sector = sector
+                        break
 
 # ── Company cards grid ────────────────────────────────────────
 if st.session_state.selected_sector and st.session_state.selected_sector in SECTOR_STOCKS:
