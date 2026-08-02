@@ -6,6 +6,8 @@
 # ============================================================
 
 import streamlit as st
+import yfinance as yf
+from datetime import date, timedelta
 
 # ── Theme constants ─────────────────────────────────────────
 # These match every color already used in the existing dashboard.
@@ -176,6 +178,29 @@ def inject_css() -> None:
     """, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=900)
+def load_price_history(tkr: str):
+    """
+    Download 5 years of daily OHLCV data for a ticker from Yahoo Finance.
+
+    Shared by Chart Terminal and Signal Scanner so both pages hit the
+    same Streamlit cache entry for a given ticker instead of each
+    re-downloading the same 5-year history independently.
+
+    Args:
+        tkr (str): The stock ticker symbol.
+
+    Returns:
+        pd.DataFrame: OHLCV data indexed by date (tz-naive).
+    """
+    today = date.today()
+    start = today - timedelta(days=365 * 5)
+    df = yf.download(tkr, start=str(start), end=str(today), auto_adjust=True, progress=False)
+    df.columns = df.columns.get_level_values(0)
+    df.index = df.index.tz_localize(None)
+    return df
+
+
 def card_header(title: str, bg: str = HEADER_BLUE) -> str:
     """
     Return an HTML string for a styled card header bar.
@@ -219,9 +244,7 @@ def universe_manager_sidebar(label: str = "🌐 Universe Manager") -> None:
     Args:
         label (str): The expander label shown in the sidebar.
     """
-    from database import get_universe, add_ticker, remove_ticker, initialize_database
-
-    initialize_database()
+    from database import get_universe, add_ticker, remove_ticker
 
     with st.sidebar.expander(label, expanded=False):
         universe = get_universe()

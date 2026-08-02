@@ -96,10 +96,15 @@ pt_tab1, pt_tab2, pt_tab3, pt_tab4 = st.tabs([
 @st.cache_data(ttl=120)
 def fetch_current_prices(tickers: tuple) -> dict:
     result = {}
+    if not tickers:
+        return result
+    # One batched multi-ticker request instead of one download per ticker.
+    batch = yf.download(list(tickers), period="2d", interval="1d",
+                        group_by="ticker", auto_adjust=True, progress=False)
     for tkr in tickers:
         try:
-            hist = yf.download(tkr, period="2d", interval="1d", auto_adjust=True, progress=False)
-            result[tkr] = float(hist["Close"].squeeze().iloc[-1])
+            closes = batch[tkr]["Close"].dropna()
+            result[tkr] = float(closes.iloc[-1]) if len(closes) else None
         except Exception:
             result[tkr] = None
     return result

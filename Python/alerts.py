@@ -55,32 +55,44 @@ ALERT_PASSWORD  = os.environ.get("ALERT_PASSWORD", "")
 ALERT_RECIPIENT = os.environ.get("ALERT_RECIPIENT", "")
 
 
-def download_data(ticker: str) -> pd.DataFrame:
+def download_universe_data(tickers: list) -> dict:
     """
-    Download 1 year of daily OHLCV data for a ticker from Yahoo Finance.
+    Download 1 year of daily OHLCV data for every ticker in one batched call.
 
     1 year is enough for the signal conditions we check:
     - RSI needs ~14 days warm-up
     - 200-day MA needs 200 days
     - 52-week high needs 252 days
 
+    A single batched yfinance request (multithreaded internally) replaces
+    what used to be one sequential HTTP round-trip per ticker.
+
     Args:
-        ticker (str): The stock ticker symbol.
+        tickers (list): Stock ticker symbols to download.
 
     Returns:
-        pd.DataFrame: OHLCV data indexed by date, or empty DataFrame on error.
+        dict: ticker -> OHLCV DataFrame indexed by date (empty DataFrame on error).
     """
+    if not tickers:
+        return {}
     try:
         today = date.today()
         start = today - timedelta(days=400)   # 400 days to ensure full 200-day MA
-        df = yf.download(ticker, start=str(start), end=str(today),
-                         auto_adjust=True, progress=False)
-        df.columns = df.columns.get_level_values(0)
-        df.index   = df.index.tz_localize(None)
-        return df
+        batch = yf.download(tickers, start=str(start), end=str(today),
+                            group_by="ticker", auto_adjust=True, progress=False)
+        batch.index = batch.index.tz_localize(None)
     except Exception as e:
-        print(f"  [ERROR] Could not download {ticker}: {e}")
-        return pd.DataFrame()
+        print(f"  [ERROR] Could not download universe data: {e}")
+        return {tkr: pd.DataFrame() for tkr in tickers}
+
+    result = {}
+    for tkr in tickers:
+        try:
+            df = batch[tkr].dropna(how="all")
+            result[tkr] = df
+        except Exception:
+            result[tkr] = pd.DataFrame()
+    return result
 
 
 def build_confidence_summary(ticker: str, signal_mask: pd.Series, close: pd.Series) -> str:
@@ -247,11 +259,13 @@ def run_alerts() -> None:
 
     alerts_fired = 0
 
+    # Step 1: Download data for the whole universe in one batched call.
+    universe_data = download_universe_data(universe)
+
     for ticker in universe:
         print(f"\n  Scanning {ticker}…")
 
-        # Step 1: Download data
-        df = download_data(ticker)
+        df = universe_data.get(ticker, pd.DataFrame())
         if df.empty or len(df) < 50:
             print(f"    Skipping — insufficient data ({len(df)} rows)")
             continue

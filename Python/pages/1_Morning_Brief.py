@@ -21,6 +21,7 @@ import plotly.express as px
 import os
 import json
 from datetime import date, datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -461,24 +462,34 @@ SECTOR_STOCKS = {
 }
 
 
+def _fetch_fast_info(tkr: str) -> dict:
+    try:
+        info = yf.Ticker(tkr).fast_info
+        mkt_cap = getattr(info, "market_cap", None) or 1e9
+        last = getattr(info, "last_price", None)
+        prev = getattr(info, "previous_close", None)
+        if last and prev and prev > 0:
+            chg = (last / prev - 1) * 100
+        else:
+            chg = 0.0
+    except Exception:
+        mkt_cap = 1e9
+        chg = 0.0
+    return {"ticker": tkr, "market_cap": mkt_cap, "change_pct": chg}
+
+
 @st.cache_data(ttl=600)
 def load_nested_treemap_data() -> pd.DataFrame:
     all_tickers = [tkr for stocks in SECTOR_STOCKS.values() for tkr in stocks]
-    rows = []
-    for tkr in all_tickers:
-        try:
-            info = yf.Ticker(tkr).fast_info
-            mkt_cap = getattr(info, "market_cap", None) or 1e9
-            last = getattr(info, "last_price", None)
-            prev = getattr(info, "previous_close", None)
-            if last and prev and prev > 0:
-                chg = (last / prev - 1) * 100
-            else:
-                chg = 0.0
-        except Exception:
-            mkt_cap = 1e9
-            chg = 0.0
-        rows.append({"ticker": tkr, "market_cap": mkt_cap, "change_pct": chg})
+
+    # fast_info has no multi-ticker batch endpoint, so fetch concurrently
+    # with a thread pool instead of one-at-a-time — these are independent
+    # I/O-bound HTTP calls, so parallelizing them is safe.
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        rows_by_ticker = {
+            row["ticker"]: row for row in executor.map(_fetch_fast_info, all_tickers)
+        }
+    rows = [rows_by_ticker[tkr] for tkr in all_tickers]
 
     sector_lookup = {
         tkr: sector
@@ -494,11 +505,15 @@ def load_nested_treemap_data() -> pd.DataFrame:
 @st.cache_data(ttl=600)
 def load_stock_changes(tickers: tuple) -> dict:
     result = {}
+    if not tickers:
+        return result
+    # One batched multi-ticker request instead of one download per ticker.
+    batch = yf.download(list(tickers), period="5d", interval="1d",
+                        group_by="ticker", auto_adjust=True, progress=False)
     for tkr in tickers:
         try:
-            df = yf.download(tkr, period="5d", interval="1d", auto_adjust=True, progress=False)
-            if len(df) >= 2:
-                closes = df["Close"].squeeze()
+            closes = batch[tkr]["Close"].dropna()
+            if len(closes) >= 2:
                 result[tkr] = (float(closes.iloc[-1]) / float(closes.iloc[-2]) - 1) * 100
             else:
                 result[tkr] = 0.0
@@ -611,27 +626,39 @@ st.markdown("<hr style='border:none;border-top:1px solid #e2e8f0;margin:20px 0;'
 # ============================================================
 
 
+def _fetch_news_for_ticker(tkr: str) -> list:
+    ticker_items = []
+    try:
+        items = yf.Ticker(tkr).news or []
+        for item in items[:5]:
+            c       = item.get("content", {})
+            title   = c.get("title", "")
+            summary = c.get("summary", "") or c.get("description", "")
+            source  = c.get("provider", {}).get("displayName", "")
+            url_obj = c.get("canonicalUrl", {})
+            url     = url_obj.get("url", "") if isinstance(url_obj, dict) else ""
+            pub     = c.get("pubDate", "")[:10]
+            if title:
+                ticker_items.append({
+                    "ticker": tkr, "title": title, "summary": summary,
+                    "source": source, "url": url, "pub": pub,
+                })
+    except Exception:
+        pass
+    return ticker_items
+
+
 @st.cache_data(ttl=600)
 def fetch_all_news(tickers: tuple) -> list:
     all_items = []
-    for tkr in tickers:
-        try:
-            items = yf.Ticker(tkr).news or []
-            for item in items[:5]:
-                c       = item.get("content", {})
-                title   = c.get("title", "")
-                summary = c.get("summary", "") or c.get("description", "")
-                source  = c.get("provider", {}).get("displayName", "")
-                url_obj = c.get("canonicalUrl", {})
-                url     = url_obj.get("url", "") if isinstance(url_obj, dict) else ""
-                pub     = c.get("pubDate", "")[:10]
-                if title:
-                    all_items.append({
-                        "ticker": tkr, "title": title, "summary": summary,
-                        "source": source, "url": url, "pub": pub,
-                    })
-        except Exception:
-            pass
+    if not tickers:
+        return all_items
+    # yf.Ticker(...).news has no batch endpoint — fetch concurrently instead
+    # of one ticker at a time. executor.map preserves input order, so the
+    # result is identical to the old sequential loop before sorting.
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        for ticker_items in executor.map(_fetch_news_for_ticker, tickers):
+            all_items.extend(ticker_items)
     all_items.sort(key=lambda x: x["pub"], reverse=True)
     return all_items
 

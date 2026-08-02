@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from utils import inject_css, universe_manager_sidebar, card_header, section_label
+from utils import inject_css, universe_manager_sidebar, card_header, section_label, load_price_history
 from utils import ACCENT, BORDER, TEXT_DARK, TEXT_MID, TEXT_LIGHT, GREEN, RED, CARD_BG, HEADER_BLUE
 from indicators import (
     calculate_rsi, calculate_macd, calculate_bollinger_bands,
@@ -75,18 +75,7 @@ st.markdown(
 # ============================================================
 
 
-@st.cache_data(ttl=900)
-def load_data(tkr: str) -> pd.DataFrame:
-    """Download 5 years of daily OHLCV data — full history for accurate indicator math."""
-    today = date.today()
-    start = today - timedelta(days=365 * 5)
-    df = yf.download(tkr, start=str(start), end=str(today), auto_adjust=True, progress=False)
-    df.columns = df.columns.get_level_values(0)
-    df.index = df.index.tz_localize(None)
-    return df
-
-
-df = load_data(ticker)
+df = load_price_history(ticker)
 
 if df.empty:
     st.error(f"No data returned for {ticker}.")

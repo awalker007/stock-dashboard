@@ -59,20 +59,25 @@ def run_momentum_radar(tickers: tuple) -> list[dict]:
     Cached 24h — one expensive scan per day.
     """
     flagged = []
+    if not tickers:
+        return flagged
     today = date.today()
     start_6m = today - timedelta(days=182)
     start_1y = today - timedelta(days=400)
 
+    # Fetch every ticker's history in a single batched call instead of one
+    # request per ticker — yfinance multithreads the batch internally.
+    batch = yf.download(list(tickers), start=str(start_1y), end=str(today),
+                        group_by="ticker", auto_adjust=True, progress=False)
+    batch.index = batch.index.tz_localize(None)
+
     for tkr in tickers:
         try:
-            df = yf.download(tkr, start=str(start_1y), end=str(today),
-                             auto_adjust=True, progress=False)
-            if len(df) < 130:
-                continue
-            df.columns = df.columns.get_level_values(0)
-            df.index = df.index.tz_localize(None)
+            df = batch[tkr]
             close  = df["Close"].squeeze()
             volume = df["Volume"].squeeze()
+            if close.dropna().shape[0] < 130:
+                continue
 
             # Criterion 1: 20-day lows are higher now vs 3 months ago
             recent_20d_low  = float(close.iloc[-20:].min())
@@ -195,13 +200,17 @@ else:
     @st.cache_data(ttl=300)
     def load_watchlist_data(tickers: tuple) -> dict:
         result = {}
+        if not tickers:
+            return result
+        # One batched multi-ticker request instead of one download per ticker.
+        batch = yf.download(list(tickers), period="35d", interval="1d",
+                            group_by="ticker", auto_adjust=True, progress=False)
         for tkr in tickers:
             try:
-                df = yf.download(tkr, period="35d", interval="1d",
-                                 auto_adjust=True, progress=False)
-                if len(df) < 2:
+                closes = batch[tkr]["Close"].dropna()
+                if len(closes) < 2:
+                    result[tkr] = {"price": None, "day_pct": None, "sparkline": []}
                     continue
-                closes = df["Close"].squeeze()
                 cur = float(closes.iloc[-1])
                 prev = float(closes.iloc[-2])
                 day_pct = (cur / prev - 1) * 100
